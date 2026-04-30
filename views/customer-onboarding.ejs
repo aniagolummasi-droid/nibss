@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> | Triakwheel Bank</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/triakwheel.css">
+</head>
+<body>
+  <main class="page-shell">
+    <section class="hero-panel" aria-labelledby="page-title">
+      <nav class="topbar" aria-label="Triakwheel navigation">
+        <span class="brand-mark">TW</span>
+        <span class="brand-name">Triakwheel</span>
+      </nav>
+
+      <div class="hero-copy">
+        <p class="eyebrow">Digital banking onboarding</p>
+        <h1 id="page-title">Open a verified customer profile in one smooth lap.</h1>
+        <p class="hero-text">
+          Capture customer details, verify identity with BVN or NIN, and prepare the account journey with a sharper banking interface.
+        </p>
+      </div>
+
+      <div class="wheel-card" aria-hidden="true">
+        <div class="wheel-orbit">
+          <span></span>
+          <span></span>
+          <span></span>
+        </div>
+        <div>
+          <strong>Verified flow</strong>
+          <small>BVN / NIN ready</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="form-panel" aria-label="Customer onboarding form">
+      <% if (error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+
+      <% if (success) { %>
+        <div class="alert alert-success">
+          <strong><%= success.message %></strong>
+          <span>Customer ID: <%= success.customerId %></span>
+          <span>Source: <%= success.verificationSource || 'identity service' %></span>
+          <a class="inline-link" href="/auth/login">Continue to login</a>
+        </div>
+      <% } %>
+
+      <div class="form-heading">
+        <p class="eyebrow">Start here</p>
+        <h2>Customer details</h2>
+        <p>All fields marked required must be completed before identity verification.</p>
+      </div>
+
+      <form action="/customer/onboarding" method="POST" class="onboarding-form">
+        <label>
+          <span>First name</span>
+          <input type="text" name="firstName" value="<%= form.firstName || '' %>" placeholder="Ada" required>
+        </label>
+
+        <label>
+          <span>Last name</span>
+          <input type="text" name="lastName" value="<%= form.lastName || '' %>" placeholder="Okafor" required>
+        </label>
+
+        <label>
+          <span>Email</span>
+          <input type="email" name="email" value="<%= form.email || '' %>" placeholder="ada@example.com" required>
+        </label>
+
+        <label>
+          <span>Phone</span>
+          <input type="tel" name="phone" value="<%= form.phone || '' %>" placeholder="+2348012345678" required>
+        </label>
+
+        <label>
+          <span>Date of birth</span>
+          <input type="date" name="dob" value="<%= form.dob || '' %>" required>
+        </label>
+
+        <label>
+          <span>BVN</span>
+          <input type="text" name="bvn" value="<%= form.bvn || '' %>" placeholder="Enter BVN">
+        </label>
+
+        <label>
+          <span>NIN</span>
+          <input type="text" name="nin" value="<%= form.nin || '' %>" placeholder="Enter NIN">
+        </label>
+
+        <label class="wide">
+          <span>Address</span>
+          <textarea name="address" rows="4" placeholder="Customer residential address" required><%= form.address || '' %></textarea>
+        </label>
+
+        <p class="form-note wide">Provide at least one identity value: BVN or NIN.</p>
+
+        <button class="submit-button wide" type="submit">Onboard customer</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>

@@ -7,6 +7,7 @@ const customerSchema = new mongoose.Schema({
   phone: { type: String, required: true },
   dob: { type: String, required: true },
   address: { type: String, required: true },
+  kycID: { type: String, required: true, unique: true },
   bvn: String,
   nin: String,
   verified: { type: Boolean, default: false },

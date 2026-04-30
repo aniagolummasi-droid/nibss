@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> | Triakwheel Bank</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/triakwheel.css">
+</head>
+<body>
+  <main class="dashboard-shell">
+    <nav class="dashboard-nav">
+      <a class="brand-lockup" href="/customer/dashboard">
+        <span class="brand-mark">TW</span>
+        <span class="brand-name">Triakwheel</span>
+      </a>
+      <div class="nav-actions">
+        <a class="nav-link" href="/account/payments/transfer">Transfer</a>
+        <form action="/auth/logout" method="POST">
+          <button class="ghost-button" type="submit">Logout</button>
+        </form>
+      </div>
+    </nav>
+
+    <% if (flash) { %>
+      <div class="alert alert-success"><%= flash %></div>
+    <% } %>
+
+    <% if (error) { %>
+      <div class="alert alert-error"><%= error %></div>
+    <% } %>
+
+    <section class="dashboard-hero">
+      <div>
+        <p class="eyebrow">Customer dashboard</p>
+        <h1>Hello, <%= customer.firstName %>.</h1>
+        <p class="hero-text dark">Here is your account status, wallet balance, and recent transaction trail.</p>
+      </div>
+
+      <div class="profile-chip">
+        <strong><%= customer.firstName %> <%= customer.lastName %></strong>
+        <span><%= customer.email %></span>
+      </div>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="balance-card">
+        <p class="eyebrow">Available balance</p>
+        <% if (account) { %>
+          <h2><%= formatCurrency(account.balance) %></h2>
+          <p>Account number: <strong><%= account.accountNumber %></strong></p>
+          <a class="submit-button button-link" href="/account/payments/transfer">Make a transfer</a>
+        <% } else { %>
+          <h2>No account yet</h2>
+          <p>Create a bank account for this customer and start with the initial deposit.</p>
+          <form action="/customer/accounts" method="POST">
+            <button class="submit-button" type="submit">Create account</button>
+          </form>
+        <% } %>
+      </article>
+
+      <article class="status-card">
+        <p class="eyebrow">Verification</p>
+        <h2><%= customer.verified ? 'Verified' : 'Pending' %></h2>
+        <p>BVN/NIN identity status for this profile.</p>
+      </article>
+    </section>
+
+    <section class="table-card">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow">Recent activity</p>
+          <h2>Transactions</h2>
+        </div>
+      </div>
+
+      <% if (transactions.length) { %>
+        <div class="transaction-list">
+          <% transactions.forEach((transaction) => { %>
+            <article class="transaction-row">
+              <div>
+                <strong><%= transaction.narration || transaction.category %></strong>
+                <span><%= transaction.reference %></span>
+              </div>
+              <div>
+                <strong class="<%= transaction.type === 'credit' ? 'credit' : 'debit' %>">
+                  <%= transaction.type === 'credit' ? '+' : '-' %><%= formatCurrency(transaction.amount) %>
+                </strong>
+                <span><%= transaction.status %></span>
+              </div>
+            </article>
+          <% }) %>
+        </div>
+      <% } else { %>
+        <p class="empty-state">No transactions yet. Once an account is created, activity will appear here.</p>
+      <% } %>
+    </section>
+  </main>
+</body>
+</html>

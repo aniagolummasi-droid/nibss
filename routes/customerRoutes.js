@@ -1,6 +1,8 @@
 const express = require('express');
 const authenticate = require('../middleware/authMiddleware');
 const {
+  renderOnboardingPage,
+  renderDashboard,
   onboardCustomer,
   createAccount,
   getBalance,
@@ -10,8 +12,10 @@ const {
 
 const router = express.Router();
 
+router.get('/onboarding', renderOnboardingPage);
 router.post('/onboarding', onboardCustomer);
 router.use(authenticate);
+router.get('/dashboard', renderDashboard);
 router.post('/accounts', createAccount);
 router.get('/accounts/balance', getBalance);
 router.get('/transactions/history', getTransactionHistory);
