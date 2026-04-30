@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title><%= title %> | Triakwheel Bank</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/triakwheel.css">
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="auth-card">
+      <a class="nav-link" href="/customer/onboarding">Back to onboarding</a>
+      <p class="eyebrow">Customer access</p>
+      <h1>Welcome back to your Triakwheel lane.</h1>
+      <p class="hero-text dark">Enter the customer email used during onboarding. We will open the banking dashboard for that profile.</p>
+
+      <% if (error) { %>
+        <div class="alert alert-error"><%= error %></div>
+      <% } %>
+
+      <form action="/auth/login" method="POST" class="stack-form">
+        <label>
+          <span>Email address</span>
+          <input type="email" name="email" value="<%= form.email || '' %>" placeholder="ada@example.com" required>
+        </label>
+
+        <button class="submit-button" type="submit">Login to dashboard</button>
+      </form>
+    </section>
+  </main>
+</body>
+</html>
