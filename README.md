@@ -25,10 +25,17 @@ Backend implementation for a digital banking system assignment.
    BANK_CODE=775
    BANK_NAME=MMA Bank
    MONGO_URI=mongodb://localhost:27017/mma-bank
-   # Optional real onboarding integration credentials
+   # Optional real NIBSS/Phoenix integration credentials
+   NIBSS_BASE_URL=https://nibssbyphoenix.onrender.com
    NIBSS_API_KEY=
    NIBSS_API_SECRET=
-   NIBSS_ONBOARDING_URL=https://nibssbyphoenix.onrender.com/api/onboarding/verify
+   NIBSS_ONBOARDING_URL=https://nibssbyphoenix.onrender.com/api/fintech/onboard
+   NIBSS_AUTH_URL=https://nibssbyphoenix.onrender.com/api/auth/token
+   NIBSS_AUTH_EMAIL=
+   NIBSS_AUTH_PASSWORD=
+   NIBSS_NAME_ENQUIRY_URL=
+   NIBSS_TRANSFER_URL=
+   NIBSS_TRANSFER_TOKEN=
    ```
 3. Start the server:
    ```bash
@@ -51,6 +58,6 @@ Backend implementation for a digital banking system assignment.
 - A customer can only have one account.
 - Accounts are pre-funded with ₦15,000 on creation.
 - Transaction history is only visible to the authenticated customer.
-- External bank transfers are simulated for inter-bank transfers.
-
-# nibss
+- Inter-bank transfers use `NIBSS_BASE_URL` by default: `GET /api/account/name-enquiry/:accountNo` and `POST /api/transfer`.
+- Set `NIBSS_TRANSFER_TOKEN`, or set `NIBSS_AUTH_EMAIL` and `NIBSS_AUTH_PASSWORD` so the app can call `POST /api/auth/token` before NIBSS-protected requests.
+- To send to another NIBSS-registered bank or fintech, supply that institution's bank code on the transfer request.

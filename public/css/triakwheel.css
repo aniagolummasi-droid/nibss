@@ -266,6 +266,29 @@ h2 {
   background: rgba(24, 160, 88, 0.16);
 }
 
+.lookup-panel {
+  margin-top: -4px;
+  padding: 13px 15px;
+  border-radius: 16px;
+  font-size: 0.92rem;
+  font-weight: 800;
+}
+
+.lookup-panel-info {
+  color: #38534d;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.lookup-panel-success {
+  color: var(--green-deep);
+  background: rgba(24, 160, 88, 0.14);
+}
+
+.lookup-panel-error {
+  color: #7a2416;
+  background: rgba(236, 106, 77, 0.16);
+}
+
 .onboarding-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

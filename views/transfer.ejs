@@ -32,8 +32,10 @@
       <form action="/account/payments/transfer" method="POST" class="stack-form">
         <label>
           <span>Recipient account number</span>
-          <input type="text" name="toAccountNumber" value="<%= form.toAccountNumber || '' %>" placeholder="1000123456" required>
+          <input id="recipientAccountNumber" type="text" name="toAccountNumber" value="<%= form.toAccountNumber || '' %>" placeholder="1000123456" required>
         </label>
+
+        <div id="recipientLookup" class="lookup-panel" hidden></div>
 
         <label>
           <span>Amount</span>
@@ -42,7 +44,7 @@
 
         <label>
           <span>Bank code</span>
-          <input type="text" name="bankCode" value="<%= form.bankCode || defaultBankCode %>" placeholder="<%= defaultBankCode %>">
+          <input id="recipientBankCode" type="text" name="bankCode" value="<%= form.bankCode || '' %>" placeholder="<%= defaultBankCode %>">
         </label>
 
         <label>
@@ -54,5 +56,93 @@
       </form>
     </section>
   </main>
+
+  <script>
+    const accountInput = document.querySelector('#recipientAccountNumber');
+    const bankCodeInput = document.querySelector('#recipientBankCode');
+    const lookupPanel = document.querySelector('#recipientLookup');
+    let lookupTimer;
+    let lastLookupKey = '';
+    let lookupController;
+
+    const setLookupPanel = (message, state = 'info') => {
+      lookupPanel.hidden = false;
+      lookupPanel.className = `lookup-panel lookup-panel-${state}`;
+      lookupPanel.textContent = message;
+    };
+
+    const clearLookupPanel = () => {
+      lookupPanel.hidden = true;
+      lookupPanel.textContent = '';
+      lookupPanel.className = 'lookup-panel';
+    };
+
+    const lookupRecipient = async () => {
+      const accountNumber = accountInput.value.replace(/\D/g, '');
+      const bankCode = bankCodeInput.value.trim();
+      const lookupKey = `${accountNumber}:${bankCode}`;
+
+      if (accountNumber.length < 10 || lookupKey === lastLookupKey) {
+        if (accountNumber.length < 10) {
+          clearLookupPanel();
+        }
+        return;
+      }
+
+      lastLookupKey = lookupKey;
+      setLookupPanel('Checking recipient details...', 'info');
+
+      if (lookupController) {
+        lookupController.abort();
+      }
+
+      lookupController = new AbortController();
+
+      try {
+        const response = await fetch('/account/payments/name-enquiry', {
+          method: 'POST',
+          signal: lookupController.signal,
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({ accountNumber, bankCode })
+        });
+        const result = await response.json();
+
+        if (!response.ok) {
+          setLookupPanel(result.error || 'Recipient could not be verified', 'error');
+          return;
+        }
+
+        if (result.bankCode) {
+          bankCodeInput.value = result.bankCode;
+        }
+
+        const bankLabel = [result.bankName, result.bankCode].filter(Boolean).join(' - ');
+        const details = bankLabel ? `${result.name} (${bankLabel})` : result.name;
+        setLookupPanel(`Recipient found: ${details}`, 'success');
+      } catch (error) {
+        if (error.name === 'AbortError') {
+          return;
+        }
+
+        setLookupPanel('Unable to check recipient right now', 'error');
+      }
+    };
+
+    accountInput.addEventListener('input', () => {
+      clearTimeout(lookupTimer);
+      lookupTimer = setTimeout(lookupRecipient, 500);
+    });
+
+    bankCodeInput.addEventListener('input', () => {
+      clearTimeout(lookupTimer);
+      lookupTimer = setTimeout(lookupRecipient, 500);
+    });
+
+    if (accountInput.value.replace(/\D/g, '').length >= 10) {
+      lookupRecipient();
+    }
+  </script>
 </body>
 </html>
