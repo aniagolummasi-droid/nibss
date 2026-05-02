@@ -2,9 +2,12 @@ const { v4: uuidv4 } = require('uuid');
 const Account = require('../models/Account');
 const Transaction = require('../models/Transaction');
 const Customer = require('../models/Customer');
+const { externalNameEnquiry, externalTransfer } = require('../services/nibssService');
 
 const OUR_BANK_CODE = process.env.BANK_CODE || '775';
 const isFormPost = (req) => req.is('application/x-www-form-urlencoded');
+const normalizeDigits = (value) => String(value || '').replace(/\D/g, '');
+const normalizeBankCode = (value) => String(value || '').trim();
 
 const formatCurrency = (amount) => `NGN ${Number(amount || 0).toLocaleString('en-NG', {
   minimumFractionDigits: 2,
@@ -60,20 +63,50 @@ const rollbackTransferBalances = async (sourceAccount, sourceBalanceBefore, dest
 };
 
 const nameEnquiry = async (req, res) => {
-  const { accountNumber, bankCode } = req.body;
-  if (!accountNumber || !bankCode) {
-    return res.status(400).json({ error: 'accountNumber and bankCode are required' });
+  const accountNumber = normalizeDigits(req.body.accountNumber);
+  const bankCode = normalizeBankCode(req.body.bankCode);
+
+  if (!accountNumber) {
+    return res.status(400).json({ error: 'accountNumber is required' });
   }
 
   try {
+    if (!bankCode) {
+      const account = await Account.findOne({ accountNumber }).populate('customerId', 'firstName lastName');
+      if (account) {
+        return res.json({
+          accountNumber: account.accountNumber,
+          bankCode: OUR_BANK_CODE,
+          bankName: process.env.BANK_NAME || 'Our Bank',
+          name: `${account.customerId.firstName} ${account.customerId.lastName}`
+        });
+      }
+    }
+
     if (bankCode === OUR_BANK_CODE) {
       const account = await Account.findOne({ accountNumber }).populate('customerId', 'firstName lastName');
       if (!account) {
         return res.status(404).json({ error: 'Recipient account not found in our bank' });
       }
-      return res.json({ accountNumber: account.accountNumber, name: `${account.customerId.firstName} ${account.customerId.lastName}` });
+      return res.json({
+        accountNumber: account.accountNumber,
+        bankCode: OUR_BANK_CODE,
+        bankName: process.env.BANK_NAME || 'Our Bank',
+        name: `${account.customerId.firstName} ${account.customerId.lastName}`
+      });
     } else {
-      return res.json({ accountNumber, bankCode, name: 'External Recipient' });
+      const enquiry = await externalNameEnquiry({ accountNumber, bankCode });
+      if (!enquiry.success) {
+        return res.status(enquiry.status || 400).json({ error: enquiry.error || 'Recipient account could not be verified' });
+      }
+
+      return res.json({
+        accountNumber,
+        bankCode: enquiry.bankCode || bankCode,
+        bankName: enquiry.bankName,
+        name: enquiry.name,
+        source: enquiry.source
+      });
     }
   } catch (error) {
     res.status(500).json({ error: 'Name enquiry failed' });
@@ -81,7 +114,9 @@ const nameEnquiry = async (req, res) => {
 };
 
 const transfer = async (req, res) => {
-  const { toAccountNumber, bankCode, narration } = req.body;
+  const { narration } = req.body;
+  const toAccountNumber = normalizeDigits(req.body.toAccountNumber);
+  const bankCode = normalizeBankCode(req.body.bankCode);
   const amount = Number(req.body.amount);
   const renderHtml = isFormPost(req);
 
@@ -112,10 +147,10 @@ const transfer = async (req, res) => {
       return res.status(400).json({ error: 'Insufficient funds' });
     }
 
-    const destinationBankCode = bankCode || OUR_BANK_CODE;
+    let destinationBankCode = bankCode;
     const reference = `TRF-${uuidv4()}`;
 
-    const finalizeTransfer = async (status, destinationAccount, counterpartyName) => {
+    const finalizeTransfer = async (status, destinationAccount, counterpartyName, externalTransferResult = null) => {
       const sourceBalanceBefore = sourceAccount.balance;
       const destinationBalanceBefore = destinationAccount ? destinationAccount.balance : null;
       let balancesChanged = false;
@@ -184,8 +219,85 @@ const transfer = async (req, res) => {
         return res.redirect(`/customer/dashboard?message=Transfer%20completed%20successfully.%20Reference:%20${encodeURIComponent(reference)}`);
       }
 
-      return res.json({ reference, status, amount, from: sourceAccount.accountNumber, to: toAccountNumber, bankCode: destinationBankCode, balance: sourceAccount.balance });
+      return res.json({
+        reference,
+        status,
+        amount,
+        from: sourceAccount.accountNumber,
+        to: toAccountNumber,
+        bankCode: destinationBankCode,
+        balance: sourceAccount.balance,
+        providerReference: externalTransferResult && externalTransferResult.providerReference
+      });
     };
+
+    const handleExternalTransfer = async (resolvedBankCode = destinationBankCode, resolvedEnquiry = null) => {
+      destinationBankCode = resolvedBankCode;
+      const enquiry = resolvedEnquiry || await externalNameEnquiry({ accountNumber: toAccountNumber, bankCode: destinationBankCode });
+      if (!enquiry.success) {
+        if (renderHtml) {
+          return renderTransferError(req, res, enquiry.status || 400, enquiry.error || 'Recipient account could not be verified');
+        }
+
+        return res.status(enquiry.status || 400).json({ error: enquiry.error || 'Recipient account could not be verified' });
+      }
+
+      destinationBankCode = enquiry.bankCode || destinationBankCode;
+      if (!destinationBankCode) {
+        if (renderHtml) {
+          return renderTransferError(req, res, 400, 'Recipient bank code could not be resolved');
+        }
+
+        return res.status(400).json({ error: 'Recipient bank code could not be resolved' });
+      }
+
+      const transferResult = await externalTransfer({
+        reference,
+        amount,
+        narration: narration || 'Transfer',
+        sourceAccountNumber: sourceAccount.accountNumber,
+        destinationAccountNumber: toAccountNumber,
+        destinationBankCode,
+        recipientName: enquiry.name
+      });
+
+      if (!transferResult.success) {
+        if (renderHtml) {
+          return renderTransferError(req, res, transferResult.status || 502, transferResult.error || 'External transfer failed');
+        }
+
+        return res.status(transferResult.status || 502).json({ error: transferResult.error || 'External transfer failed' });
+      }
+
+      return finalizeTransfer('completed', null, enquiry.name, transferResult);
+    };
+
+    if (!destinationBankCode) {
+      const destinationAccount = await Account.findOne({ accountNumber: toAccountNumber });
+      if (destinationAccount) {
+        if (destinationAccount._id.toString() === sourceAccount._id.toString()) {
+          if (renderHtml) {
+            return renderTransferError(req, res, 400, 'Cannot transfer to the same account');
+          }
+
+          return res.status(400).json({ error: 'Cannot transfer to the same account' });
+        }
+
+        destinationBankCode = OUR_BANK_CODE;
+        return finalizeTransfer('completed', destinationAccount, `${destinationAccount.accountNumber}`);
+      }
+
+      const enquiry = await externalNameEnquiry({ accountNumber: toAccountNumber });
+      if (!enquiry.success) {
+        if (renderHtml) {
+          return renderTransferError(req, res, enquiry.status || 400, enquiry.error || 'Recipient account could not be verified');
+        }
+
+        return res.status(enquiry.status || 400).json({ error: enquiry.error || 'Recipient account could not be verified' });
+      }
+
+      return handleExternalTransfer(enquiry.bankCode, enquiry);
+    }
 
     if (destinationBankCode === OUR_BANK_CODE) {
       const destinationAccount = await Account.findOne({ accountNumber: toAccountNumber });
@@ -206,7 +318,7 @@ const transfer = async (req, res) => {
 
       await finalizeTransfer('completed', destinationAccount, `${destinationAccount.accountNumber}`);
     } else {
-      await finalizeTransfer('completed', null, 'External Recipient');
+      await handleExternalTransfer(destinationBankCode);
     }
   } catch (error) {
     console.error('Transfer failed:', error);
