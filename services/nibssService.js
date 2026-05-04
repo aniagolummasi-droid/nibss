@@ -1,13 +1,15 @@
 const DEFAULT_NIBSS_BASE_URL = 'https://nibssbyphoenix.onrender.com';
 let cachedTransferToken = null;
 let cachedTransferTokenExpiresAt = 0;
+let transferTokenRefreshPromise = null;
+let warnedExpiredTransferToken = null;
 
 const normalizeBaseUrl = (url) => String(url || DEFAULT_NIBSS_BASE_URL).replace(/\/+$/, '');
 const nibssUrl = (path) => `${normalizeBaseUrl(process.env.NIBSS_BASE_URL)}${path}`;
 
 const verifyIdentity = async ({ bvn, nin, email, firstName, lastName, dob, phone }) => {
   if (!bvn && !nin) {
-    return { success: false, error: 'Either BVN or NIN must be provided' };
+    return { success: true, source: 'basic-onboarding' };
   }
 
   const hasCredentials = process.env.NIBSS_API_KEY && process.env.NIBSS_API_SECRET;
@@ -30,28 +32,21 @@ const verifyIdentity = async ({ bvn, nin, email, firstName, lastName, dob, phone
       payload = { nin, firstName, lastName, dob };
     }
 
-    const response = await fetch(url, {
+    const headersResult = await externalHeaders({ authorized: true });
+    if (!headersResult.success) {
+      return headersResult;
+    }
+
+    const response = await fetchWithRetry(url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': process.env.NIBSS_API_KEY,
-        'x-api-secret': process.env.NIBSS_API_SECRET
-      },
+      headers: headersResult.headers,
       body: JSON.stringify(payload)
     });
 
-    let responseBody;
-    const contentType = response.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      responseBody = await response.json();
-    } else {
-      responseBody = await response.text();
-    }
+    const responseBody = await readResponseBody(response);
 
-    if (!response.ok) {
-      const errorMessage = typeof responseBody === 'object'
-        ? responseBody.error || JSON.stringify(responseBody)
-        : responseBody;
+    if (!response.ok || !isSuccessfulResponse(responseBody)) {
+      const errorMessage = responseMessage(responseBody);
       console.error('NIBSS verification failed:', response.status, errorMessage);
       return {
         success: false,
@@ -213,44 +208,51 @@ const decodeJwtExpiry = (token) => {
       return 0;
     }
 
-    const decoded = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
+    const base64 = payload.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = JSON.parse(Buffer.from(base64, 'base64').toString('utf8'));
+    
     return decoded.exp ? decoded.exp * 1000 : 0;
   } catch (error) {
     return 0;
   }
 };
 
-const loginPayload = () => {
-  const email = process.env.NIBSS_AUTH_EMAIL || process.env.NIBSS_FINTECH_EMAIL || process.env.NIBSS_EMAIL;
-  const password = process.env.NIBSS_AUTH_PASSWORD || process.env.NIBSS_FINTECH_PASSWORD || process.env.NIBSS_PASSWORD;
+const sanitizeJwt = (token) => {
+  if (!token) {
+    return null;
+  }
 
-  if (!email || !password) {
+  const cleaned = String(token).trim();
+  const parts = cleaned.split('.');
+  return parts.length > 3 ? parts.slice(0, 3).join('.') : cleaned;
+};
+
+const hasUsableExpiry = (expiry, leewayMilliseconds = 30000) => expiry === 0 || expiry > Date.now() + leewayMilliseconds;
+
+const loginPayload = () => {
+  const apiKey = process.env.NIBSS_API_KEY;
+  const apiSecret = process.env.NIBSS_API_SECRET;
+
+  if (!apiKey || !apiSecret) {
+    console.warn('[NIBSS] Missing NIBSS_API_KEY or NIBSS_API_SECRET for auto-login.');
     return null;
   }
 
   return {
-    email,
-    password,
-    Email: email,
-    Password: password
+    apiKey,
+    apiSecret,
+    apikey: apiKey,
+    apisecret: apiSecret
   };
 };
 
-const getTransferToken = async () => {
-  if (process.env.NIBSS_TRANSFER_TOKEN) {
-    return { success: true, token: process.env.NIBSS_TRANSFER_TOKEN };
-  }
-
-  if (cachedTransferToken && cachedTransferTokenExpiresAt > Date.now() + 60000) {
-    return { success: true, token: cachedTransferToken };
-  }
-
+const requestTransferToken = async () => {
   const payload = loginPayload();
   if (!payload) {
     return {
       success: false,
       status: 500,
-      error: 'NIBSS transfer token is not configured. Set NIBSS_TRANSFER_TOKEN or NIBSS_AUTH_EMAIL/NIBSS_AUTH_PASSWORD.'
+      error: 'NIBSS transfer token is not configured. Set NIBSS_TRANSFER_TOKEN or NIBSS_API_KEY/NIBSS_API_SECRET.'
     };
   }
 
@@ -275,32 +277,59 @@ const getTransferToken = async () => {
       return { success: false, status: 502, error: 'NIBSS login response did not include a token' };
     }
 
-    cachedTransferToken = token;
-    cachedTransferTokenExpiresAt = decodeJwtExpiry(token) || Date.now() + (10 * 60 * 1000);
-    return { success: true, token };
+    cachedTransferToken = sanitizeJwt(token);
+    cachedTransferTokenExpiresAt = decodeJwtExpiry(cachedTransferToken) || (Date.now() + 600000);
+    process.env.NIBSS_TRANSFER_TOKEN = cachedTransferToken;
+    return { success: true, token: cachedTransferToken };
   } catch (error) {
     console.warn('NIBSS login fetch error:', error.cause ? error.cause.code : error.message);
     return { success: false, status: 502, error: networkErrorMessage('NIBSS login service', error) };
   }
 };
 
+const refreshTransferToken = async () => {
+  if (!transferTokenRefreshPromise) {
+    transferTokenRefreshPromise = requestTransferToken().finally(() => {
+      transferTokenRefreshPromise = null;
+    });
+  }
+
+  return transferTokenRefreshPromise;
+};
+
+const getTransferToken = async () => {
+  if (cachedTransferToken && hasUsableExpiry(cachedTransferTokenExpiresAt)) {
+    return { success: true, token: cachedTransferToken };
+  }
+
+  const envToken = sanitizeJwt(process.env.NIBSS_TRANSFER_TOKEN);
+  if (envToken) {
+    const expiry = decodeJwtExpiry(envToken);
+    if (hasUsableExpiry(expiry)) {
+      cachedTransferToken = envToken;
+      cachedTransferTokenExpiresAt = expiry || (Date.now() + 600000);
+      process.env.NIBSS_TRANSFER_TOKEN = envToken;
+      return { success: true, token: envToken };
+    }
+
+    if (warnedExpiredTransferToken !== envToken) {
+      warnedExpiredTransferToken = envToken;
+      console.warn('[NIBSS] NIBSS_TRANSFER_TOKEN in .env has expired. Attempting refresh via login...');
+    }
+  }
+
+  return refreshTransferToken();
+};
+
 const externalHeaders = async ({ authorized = false } = {}) => {
   const headers = { 'Content-Type': 'application/json' };
 
-  if (process.env.NIBSS_API_KEY) {
-    headers['x-api-key'] = process.env.NIBSS_API_KEY;
-  }
-
-  if (process.env.NIBSS_API_SECRET) {
-    headers['x-api-secret'] = process.env.NIBSS_API_SECRET;
-  }
+  if (process.env.NIBSS_API_KEY) headers['x-api-key'] = process.env.NIBSS_API_KEY;
+  if (process.env.NIBSS_API_SECRET) headers['x-api-secret'] = process.env.NIBSS_API_SECRET;
 
   if (authorized) {
     const tokenResult = await getTransferToken();
-    if (!tokenResult.success) {
-      return tokenResult;
-    }
-
+    if (!tokenResult.success) return tokenResult;
     headers.Authorization = `Bearer ${tokenResult.token}`;
   }
 
@@ -398,25 +427,10 @@ const externalTransfer = async ({
       body: JSON.stringify({
         from: sourceAccountNumber,
         to: destinationAccountNumber,
-        amount: String(amount),
-        reference,
-        transactionId: reference,
-        transactionID: reference,
-        xref: reference,
-        Amount: amount,
-        narration,
-        fromAccountNumber: sourceAccountNumber,
-        toAccountNumber: destinationAccountNumber,
-        sourceAccountNumber,
-        senderAccountNumber: sourceAccountNumber,
-        sourceBankCode: process.env.BANK_CODE,
-        senderBankCode: process.env.BANK_CODE,
-        destinationAccountNumber,
-        recipientAccountNumber: destinationAccountNumber,
-        accountNumber: destinationAccountNumber,
-        destinationBankCode,
-        recipientBankCode: destinationBankCode,
+        amount: Number(amount),
         bankCode: destinationBankCode,
+        reference,
+        narration,
         recipientName
       })
     });
@@ -426,23 +440,17 @@ const externalTransfer = async ({
       console.warn('NIBSS transfer rejected:', {
         status: response.status,
         body,
-        payload: {
-          from: sourceAccountNumber,
-          to: destinationAccountNumber,
-          amount: String(amount)
-        }
+        payload: { from: sourceAccountNumber, to: destinationAccountNumber, amount: Number(amount), bankCode: destinationBankCode, recipientName }
       });
-
       return {
         success: false,
         status: response.status,
-        error: responseMessage(body) || 'NIBSS transfer failed'
+        error: responseMessage(body) || 'External transfer failed'
       };
     }
 
     return {
       success: true,
-      source: 'nibss',
       providerReference: extractProviderReference(body),
       details: body
     };

@@ -42,8 +42,8 @@ const authenticate = async (req, res, next) => {
     if (req.accepts('html')) {
       return res.redirect('/auth/login');
     }
-
-    return res.status(401).json({ error: 'Invalid token' });
+    const message = error.name === 'TokenExpiredError' ? 'Token expired' : 'Invalid token';
+    return res.status(401).json({ error: message });
   }
 };
 

@@ -60,12 +60,8 @@ const onboardCustomer = async (req, res) => {
     });
   };
 
-  if (!firstName || !lastName || !email || !phone || !dob || !address) {
-    return renderFormError(400, 'Missing required onboarding fields');
-  }
-
-  if (!bvn && !nin) {
-    return renderFormError(400, 'BVN or NIN is required for verification');
+  if (!firstName || !lastName || !email) {
+    return renderFormError(400, 'First name, last name, and email are required');
   }
 
   try {
@@ -74,12 +70,17 @@ const onboardCustomer = async (req, res) => {
       return renderFormError(409, 'A customer with this email already exists');
     }
 
-    const existingKyc = await Customer.findOne({ kycID });
-    if (existingKyc) {
-      return renderFormError(409, 'A customer with this BVN or NIN already exists');
+    if (kycID) {
+      const existingKyc = await Customer.findOne({ kycID });
+      if (existingKyc) {
+        return renderFormError(409, 'A customer with this BVN or NIN already exists');
+      }
     }
 
-    const verification = await verifyIdentity({ bvn, nin, email, firstName, lastName, dob, phone });
+    const verification = (bvn || nin) 
+      ? await verifyIdentity({ bvn, nin, email, firstName, lastName, dob, phone })
+      : { success: true, source: 'basic-onboarding' };
+
     if (!verification.success) {
       return renderFormError(400, verification.error || 'Verification failed');
     }
